@@ -2,6 +2,7 @@ package org.apache.mesos.elasticsearch.scheduler;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.apache.mesos.Protos;
 import org.apache.mesos.elasticsearch.common.Discovery;
@@ -33,6 +34,7 @@ public class Configuration {
     // **** ELASTICSEARCH
     public static final String ELASTICSEARCH_CPU = "--elasticsearchCpu";
     public static final String ELASTICSEARCH_RAM = "--elasticsearchRam";
+    public static final String ELASTICSEARCH_HEAP_RAM = "--elasticsearchHeap";
     public static final String ELASTICSEARCH_DISK = "--elasticsearchDisk";
     // **** WEB UI
     public static final String WEB_UI_PORT = "--webUiPort";
@@ -46,6 +48,7 @@ public class Configuration {
     // DCOS Certification requirement 13
     public static final String FRAMEWORK_ROLE = "--frameworkRole";
     public static final String EXECUTOR_IMAGE = "--elasticsearchDockerImage";
+    public static final String EXECUTOR_VERSION = "--elasticVersion";
     public static final String EXECUTOR_BINARY = "--elasticsearchBinaryUrl";
     public static final String DEFAULT_EXECUTOR_IMAGE = "elasticsearch:latest";
     public static final String EXECUTOR_FORCE_PULL_IMAGE = "--executorForcePullImage";
@@ -75,6 +78,8 @@ public class Configuration {
     private double cpus = 1.0;
     @Parameter(names = {ELASTICSEARCH_RAM}, description = "The amount of ram resource to allocate to the elasticsearch instance (MB).", validateValueWith = CLIValidators.PositiveDouble.class)
     private double mem = 256;
+    @Parameter(names = {ELASTICSEARCH_HEAP_RAM}, description = "The amount of ram resource to allocate to the elasticsearch instance (MB).", validateValueWith = CLIValidators.PositiveDouble.class)
+    private double heapMem = 128;
     @Parameter(names = {ELASTICSEARCH_DISK}, description = "The amount of Disk resource to allocate to the elasticsearch instance (MB).", validateValueWith = CLIValidators.PositiveDouble.class)
     private double disk = 1024;
     @Parameter(names = {WEB_UI_PORT}, description = "TCP port for web ui interface.", validateValueWith = CLIValidators.PositiveInteger.class)
@@ -99,6 +104,8 @@ public class Configuration {
     private String frameworkRole = "*"; // This is the default if none is passed to Mesos
     @Parameter(names = {EXECUTOR_IMAGE}, description = "The elasticsearch docker image to use. E.g. 'elasticsearch:latest' [DOCKER MODE ONLY]", validateWith = CLIValidators.NotEmptyString.class)
     private String executorImage = DEFAULT_EXECUTOR_IMAGE;
+    @Parameter(names = {EXECUTOR_VERSION}, description = "The elasticseach version. E.g. '5.0'")
+    private String executorVersion = "2.4";
     @Parameter(names = {EXECUTOR_BINARY}, description = "The elasticsearch binary to use (Must be tar.gz format). " +
             "E.g. 'https://download.elasticsearch.org/elasticsearch/release/org/elasticsearch/distribution/tar/elasticsearch/2.2.0/elasticsearch-2.2.0.tar.gz' [JAR MODE ONLY]", validateWith = CLIValidators.NotEmptyString.class)
     private String executorBinary = "";
@@ -144,6 +151,10 @@ public class Configuration {
 
     public double getMem() {
         return mem;
+    }
+
+    public double getHeapMem() {
+        return heapMem;
     }
 
     public double getDisk() {
@@ -208,6 +219,10 @@ public class Configuration {
 
     public String getExecutorImage() {
         return executorImage;
+    }
+
+    public String getExecutorVersion() {
+        return executorVersion;
     }
 
     public Boolean getExecutorForcePullImage() {
@@ -314,6 +329,7 @@ public class Configuration {
                 + "\" nobody";
     }
 
+    @SuppressWarnings("PMD.AvoidUsingHardCodedIP")
     public List<String> esArguments(ClusterState clusterState, Protos.DiscoveryInfo discoveryInfo, Protos.SlaveID slaveID) {
         List<String> args = new ArrayList<>();
         List<Protos.TaskInfo> taskList = clusterState.getTaskList();
@@ -324,34 +340,35 @@ public class Configuration {
             InetSocketAddress transportAddress = clusterState.getGuiTaskList().get(taskId).getTransportAddress();
             hostAddress = NetworkUtils.addressToString(transportAddress, getIsUseIpAddress()).replace("http://", "");
         }
-        addIfNotEmpty(args, "--default.discovery.zen.ping.unicast.hosts", hostAddress);
-        args.add("--default.http.port=" + discoveryInfo.getPorts().getPorts(Discovery.CLIENT_PORT_INDEX).getNumber());
-        args.add("--default.transport.tcp.port=" + discoveryInfo.getPorts().getPorts(Discovery.TRANSPORT_PORT_INDEX).getNumber());
-        args.add("--default.cluster.name=" + getElasticsearchClusterName());
-        args.add("--default.node.master=true");
-        args.add("--default.node.data=true");
-        args.add("--default.node.local=false");
-        args.add("--default.index.number_of_replicas=0");
-        args.add("--default.index.auto_expand_replicas=0-all");
+        addIfNotEmpty(args, "default.discovery.zen.ping.unicast.hosts", hostAddress);
+        addArgs(args, "default.http.port", String.valueOf(discoveryInfo.getPorts().getPorts(Discovery.CLIENT_PORT_INDEX).getNumber()));
+        addArgs(args, "default.transport.tcp.port", String.valueOf(discoveryInfo.getPorts().getPorts(Discovery.TRANSPORT_PORT_INDEX).getNumber()));
+        addArgs(args, "default.cluster.name", getElasticsearchClusterName());
+        addArgs(args, "default.node.master", "true");
+        addArgs(args, "default.node.data", "true");
+        addArgsForVersion(args, "default.node.local", "false", "2.");
+        addArgsForVersion(args, "default.index.number_of_replicas", "0", "2.");
+        addArgsForVersion(args, "default.index.auto_expand_replicas", "0-all", "2.");
         if (!isFrameworkUseDocker()) {
             String taskSpecificDataDir = taskSpecificHostDir(slaveID);
-            args.add("--path.home=" + HOST_PATH_HOME); // Cannot be overidden
-            args.add("--default.path.data=" + taskSpecificDataDir);
-            args.add("--path.conf=" + HOST_PATH_CONF); // Cannot be overidden
+            addArgs(args, "path.home", HOST_PATH_HOME); // Cannot be overidden
+            addArgs(args, "default.path.data", taskSpecificDataDir);
+            addArgs(args, "path.conf", HOST_PATH_CONF); // Cannot be overidden
         } else {
-            args.add("--path.data=" + CONTAINER_PATH_DATA); // Cannot be overidden
+            addArgs(args, "path.data", CONTAINER_PATH_DATA); // Cannot be overidden
         }
-        args.add("--default.bootstrap.mlockall=true");
-        args.add("--default.network.bind_host=0.0.0.0");
-        args.add("--default.network.publish_host=_non_loopback:ipv4_");
-        args.add("--default.gateway.recover_after_nodes=1");
-        args.add("--default.gateway.expected_nodes=1");
-        args.add("--default.indices.recovery.max_bytes_per_sec=100mb");
-        args.add("--default.discovery.type=zen");
-        args.add("--default.discovery.zen.fd.ping_timeout=30s");
-        args.add("--default.discovery.zen.fd.ping_interval=1s");
-        args.add("--default.discovery.zen.fd.ping_retries=30");
-        args.add("--default.discovery.zen.ping.multicast.enabled=false");
+        addArgsForVersion(args, "default.bootstrap.mlockall", "true", "2.");
+        addArgsForVersion(args, "default.bootstrap.memory_lock", "true", "5.");
+        addArgs(args, "default.network.bind_host", "0.0.0.0");
+        addArgsForVersion(args, "default.network.publish_host", "_non_loopback:ipv4_", "2.");
+        addArgs(args, "default.gateway.recover_after_nodes", "1");
+        addArgs(args, "default.gateway.expected_nodes", "1");
+        addArgs(args, "default.indices.recovery.max_bytes_per_sec", "100mb");
+        addArgs(args, "default.discovery.type", "zen");
+        addArgs(args, "default.discovery.zen.fd.ping_timeout", "30s");
+        addArgs(args, "default.discovery.zen.fd.ping_interval", "1s");
+        addArgs(args, "default.discovery.zen.fd.ping_retries", "30");
+        addArgsForVersion(args, "default.discovery.zen.ping.multicast.enabled", "false", "2.");
 
 
         return args;
@@ -363,7 +380,26 @@ public class Configuration {
 
     private void addIfNotEmpty(List<String> args, String key, String value) {
         if (!value.isEmpty()) {
-            args.addAll(asList(key, value));
+            addArgs(args, key, value);
+        }
+    }
+
+    private void addArgsForVersion(List<String> args, String key, String value, String versionPrefix) {
+        if (StringUtils.startsWith(this.executorVersion, versionPrefix)) {
+            this.addArgs(args, key, value);
+        }
+    }
+
+    private void addArgs(List<String> args, String key, String value) {
+        if (StringUtils.startsWith(this.executorVersion, "5.")) {
+            // for es 5
+            if (StringUtils.startsWith(key, "index.") || StringUtils.startsWith(key, "default.index.")) {
+                // es 5 not allow set index option from arguments
+                return;
+            }
+            args.add("-E" + key + "=" + value);
+        } else {
+            args.add("--" + key + "=" + value);
         }
     }
 

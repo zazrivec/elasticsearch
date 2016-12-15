@@ -176,7 +176,10 @@ public class TaskInfoFactory {
                 .addParameters(Protos.Parameter.newBuilder().setKey("env").setValue("MESOS_TASK_ID=" + taskID.getValue()))
                 .setImage(configuration.getExecutorImage())
                 .setForcePullImage(configuration.getExecutorForcePullImage())
-                .setNetwork(Protos.ContainerInfo.DockerInfo.Network.HOST);
+                .setNetwork(Protos.ContainerInfo.DockerInfo.Network.HOST)
+                .setPrivileged(true)
+                .addParameters(Protos.Parameter.newBuilder().setKey("ulimit").setValue("memlock=-1:-1"))
+                .addParameters(Protos.Parameter.newBuilder().setKey("ulimit").setValue("nofile=65536:65536"));
         // Add all env vars to container
         for (Protos.Environment.Variable variable : environment.getVariablesList()) {
             dockerInfo.addParameters(Protos.Parameter.newBuilder().setKey("env").setValue(variable.getName() + "=" + variable.getValue()));

@@ -1,5 +1,6 @@
 package org.apache.mesos.elasticsearch.scheduler.configuration;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.apache.mesos.Protos;
 import org.apache.mesos.elasticsearch.scheduler.Configuration;
@@ -19,6 +20,7 @@ public class ExecutorEnvironmentalVariables {
     
     public static final String JAVA_OPTS = "JAVA_OPTS";
     public static final String ES_HEAP = "ES_HEAP_SIZE";
+    public static final String ES_JAVA_HEAP = "ES_JAVA_OPTS";
     public static final int EXTERNAL_VOLUME_NOT_CONFIGURED = -1;
     public static final String ELASTICSEARCH_NODE_ID = "ELASTICSEARCH_NODE_ID";
 
@@ -63,10 +65,35 @@ public class ExecutorEnvironmentalVariables {
      * @param configuration
      */
     private void populateEnvMap(Configuration configuration) {
-        addToList(ES_HEAP, getHeapSpaceString(configuration));
+        String executorVersion = configuration.getExecutorVersion();
+        int majorVersion = parseMajorVersion(executorVersion);
+
+        if (majorVersion >= 5) {
+            String memString = getHeapSpaceString(configuration);
+            String javaHeapOps = String.format("-Xms%s -Xmx%s", memString, memString);
+            addToList(ES_JAVA_HEAP, javaHeapOps);
+        } else {
+            addToList(ES_HEAP, getHeapSpaceString(configuration));
+        }
+
         if (configuration.isFrameworkUseDocker()) {
             addToList(native_mesos_library_key, native_mesos_library_path);
         }
+    }
+
+    private int parseMajorVersion(String version) {
+        try {
+            if (StringUtils.isNotBlank(version)) {
+                String[] versionArray = version.split("\\.");
+                if (versionArray.length > 0) {
+                    return Integer.parseInt(versionArray[0]);
+                }
+            }
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+
+        return -1;
     }
 
     private void populateEnvMapForMesos(Configuration configuration, Long nodeId) {
@@ -109,6 +136,10 @@ public class ExecutorEnvironmentalVariables {
      */
     private String getHeapSpaceString(Configuration configuration) {
         int osRam = (int) Math.min(256.0, configuration.getMem() / 4.0);
-        return "" + ((int) configuration.getMem() - osRam) + "m";
+        int calcHeap = (int) configuration.getMem() - osRam;
+        if (calcHeap > configuration.getHeapMem()) {
+            calcHeap = (int) configuration.getHeapMem();
+        }
+        return "" + calcHeap + "m";
     }
 }
