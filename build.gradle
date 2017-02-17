@@ -212,13 +212,13 @@ subprojects {
                         tag = ('version'.equals(aTag)) ? project.version : aTag
                         doFirst {
                             ['dockerHubUsername', 'dockerHubPassword', 'dockerHubEmail'].each {
-                                assert project.hasProperty(it): 'Undefined "' + it + '" property'
+                                assert System.getenv(it): 'Undefined "' + it + '" property'
                             }
                             docker {
                                 registryCredentials {
-                                    username = project.property('dockerHubUsername')
-                                    password = project.property('dockerHubPassword')
-                                    email = project.property('dockerHubEmail')
+                                    username = System.getenv('dockerHubUsername')
+                                    password = System.getenv('dockerHubPassword')
+                                    email = System.getenv('dockerHubEmail')
                                 }
                             }
                         }
