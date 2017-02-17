@@ -1,4 +1,4 @@
 #!/bin/bash
 set -ev
 
-./gradlew --info --stacktrace clean build
+./gradlew --info --stacktrace clean build buildDockerImage
