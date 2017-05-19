@@ -24,8 +24,6 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.stream.Collectors;
 
-import static java.util.Arrays.asList;
-
 /**
  * Holder object for framework configuration.
  */
@@ -340,6 +338,7 @@ public class Configuration {
             InetSocketAddress transportAddress = clusterState.getGuiTaskList().get(taskId).getTransportAddress();
             hostAddress = NetworkUtils.addressToString(transportAddress, getIsUseIpAddress()).replace("http://", "");
         }
+        addArgsForVersion(args, "bin/elasticsearch", "5.4");
         addIfNotEmpty(args, "default.discovery.zen.ping.unicast.hosts", hostAddress);
         addArgs(args, "default.http.port", String.valueOf(discoveryInfo.getPorts().getPorts(Discovery.CLIENT_PORT_INDEX).getNumber()));
         addArgs(args, "default.transport.tcp.port", String.valueOf(discoveryInfo.getPorts().getPorts(Discovery.TRANSPORT_PORT_INDEX).getNumber()));
@@ -390,6 +389,12 @@ public class Configuration {
         }
     }
 
+    private void addArgsForVersion(List<String> args, String value, String versionPrefix) {
+        if (StringUtils.startsWith(this.executorVersion, versionPrefix)) {
+            args.add(value);
+        }
+    }
+
     private void addArgs(List<String> args, String key, String value) {
         if (StringUtils.startsWith(this.executorVersion, "5.")) {
             // for es 5
@@ -397,7 +402,12 @@ public class Configuration {
                 // es 5 not allow set index option from arguments
                 return;
             }
-            args.add("-E" + key + "=" + value);
+            if (StringUtils.startsWith(this.executorVersion, "5.4") && StringUtils.startsWith(key, "default")) {
+                // es 5.4.0 does not support default arguments
+                args.add("-E" + key.replaceFirst("default.", "") + "=" + value);
+            } else {
+                args.add("-E" + key + "=" + value);
+            }
         } else {
             args.add("--" + key + "=" + value);
         }
